@@ -1,5 +1,6 @@
 const express = require("express")
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const jwt = require('jsonwebtoken')
 const cors = require("cors")
 require('dotenv').config()
 
@@ -10,14 +11,37 @@ app.use(cors())
 app.use(express.json())
 
 
+
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASSWORD}@cluster0.8r9nhhc.mongodb.net/?retryWrites=true&w=majority`;
 
 const client = new MongoClient(uri, { useNewUrlParser: true, useUnifiedTopology: true, serverApi: ServerApiVersion.v1 });
+
+function verifyJWT(req, res, next) {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+        return res.status(401).send({ message: 'Unauthorized Access' })
+    }
+    const token = authHeader.split(' ')[1];
+    jwt.verify(token, process.env.ACCES_TOKEN_SECRET, function (error, decoded) {
+        if (error) {
+            return res.status(401).send({ message: 'Forbidden Access' })
+        }
+        req.decoded = decoded;
+        next();
+    })
+}
+
 
 async function run() {
     try {
         const serviceCollection = client.db('geniuscar').collection('services');
         const orderCollection = client.db('geniuscar').collection('orders');
+
+        app.post('/jwt', (req, res) => {
+            const user = req.body;
+            const token = jwt.sign(user, process.env.ACCES_TOKEN_SECRET, { expiresIn: '1h' });
+            res.send({ token })
+        })
 
         app.get('/services', async (req, res) => {
             const query = {};
@@ -34,13 +58,18 @@ async function run() {
         })
 
         //orders API
-        app.post('/orders', async (req, res) => {
+        app.post('/orders', verifyJWT, async (req, res) => {
             const order = req.body;
             const result = await orderCollection.insertOne(order)
             res.send(result)
         })
 
-        app.get('/orders', async (req, res) => {
+        app.get('/orders', verifyJWT, async (req, res) => {
+            const decoded = req.decoded;
+            if (decoded.email !== req.query.email) {
+                return res.status(403).send({ message: 'Forbidden Access' })
+            }
+
             let query = {};
             if (req.query.email) {
                 query = {
